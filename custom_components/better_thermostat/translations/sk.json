@@ -120,6 +120,14 @@
           }
         }
       }
+    },
+    "degraded_mode": {
+      "title": "BT: {name} - chyba snímača: {sensors} beží v obmedzenom režime",
+      "description": "Better Thermostat beží v obmedzenom režime, pretože niektoré snímače nie sú dostupné: {sensors}\n\nTermostat bude naďalej fungovať s obmedzenou funkcionalitou. Napríklad:\n- Ak snímač izbovej teploty nie je dostupný, použije sa interný snímač TRV.\n- Ak snímače okien nie sú dostupné, okná sa považujú za zatvorené.\n- Ak vonkajšie/meteorologické snímače nie sú dostupné, kúrenie bude vždy zapnuté.\n\nSkontrolujte, či postihnuté zariadenia nemajú problémy s batériou alebo pripojením."
+    },
+    "invalid_window_state": {
+      "title": "BT: {name} - neplatný stav snímača okna",
+      "description": "Snímač okna pre Better Thermostat {name} nahlásil nerozpoznaný stav: {state}.\n\nOčakávané stavy sú: 'on', 'off', 'true', 'false', 'open', 'closed'.\n\nSkontrolujte konfiguráciu snímača okna."
     }
   },
   "services": {
