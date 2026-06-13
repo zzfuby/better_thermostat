@@ -332,8 +332,18 @@ async def control_cooler(self):
     # Gate on BT HVAC mode (not desired_mode) because the normal cooling logic
     # already sets desired_mode=OFF when cur_temp <= bt_target_temp, which
     # would prevent anti-overcooling from ever firing.
+    #
+    # For explicit COOL mode: always guard against overcooling.
+    # For HEAT_COOL mode: only guard when the AC is actually cooling
+    # (current_hvac_mode == COOL), to avoid interfering with heating.
     if (
-        self.bt_hvac_mode == HVACMode.COOL
+        (
+            self.bt_hvac_mode == HVACMode.COOL
+            or (
+                self.bt_hvac_mode == HVACMode.HEAT_COOL
+                and current_hvac_mode == HVACMode.COOL
+            )
+        )
         and self.cur_temp is not None
         and self.bt_target_temp is not None
     ):
