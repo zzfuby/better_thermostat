@@ -533,6 +533,7 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
         #
         # - HEAT mode, cur_temp >= target: set temp = ac_current_temp + step
         # - COOL mode, cur_temp <= target: set temp = ac_current_temp - step
+        _new_fan_mode = None
         if (
             hvac_mode in (HVACMode.HEAT, HVACMode.COOL)
             and _new_heating_setpoint is not None
@@ -571,22 +572,96 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
                     hvac_mode == HVACMode.COOL
                     and self.cur_temp <= self.bt_target_temp
                 ):
-                    # Target reached in COOL mode: set temp slightly below current
-                    # to keep inverter AC running at minimal cooling power
-                    _adjusted = _ac_current_temp - _step
+                    # Anti-overcooling protection for inverter AC in COOL mode.
+                    # When the external temperature has dropped below the target,
+                    # the AC in low-frequency mode may still be cooling and cause
+                    # further temperature drop.
+                    #
+                    # Two levels:
+                    #   Level 2: ext < target - 2*step  →  switch to FAN_ONLY/OFF
+                    #   Level 1: ext <= target - step   →  raise setpoint above AC sensor
+                    #   Default: target just reached     →  original minimal cooling
+                    if self.cur_temp < self.bt_target_temp - 2 * _step:
+                        # Level 2: Severely below target — stop cooling entirely
+                        _trv_hvac_modes = self.real_trvs[entity_id].get(
+                            "hvac_modes"
+                        ) or []
+                        if HVACMode.FAN_ONLY in _trv_hvac_modes:
+                            hvac_mode = HVACMode.FAN_ONLY
+                            # Find the lowest available fan speed
+                            _fan_modes = self.real_trvs[entity_id].get(
+                                "fan_modes"
+                            ) or []
+                            for _candidate in (
+                                "low", "lowest", "quiet", "minimum", "speed_1"
+                            ):
+                                if _candidate in _fan_modes:
+                                    _new_fan_mode = _candidate
+                                    break
+                            _LOGGER.info(
+                                "better_thermostat %s: anti-overcool level-2 for TRV %s: "
+                                "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                                "switching to FAN_ONLY (fan_mode=%s, available=%s)",
+                                self.device_name,
+                                entity_id,
+                                self.cur_temp,
+                                self.bt_target_temp,
+                                _step,
+                                _new_fan_mode,
+                                _fan_modes,
+                            )
+                        else:
+                            hvac_mode = HVACMode.OFF
+                            _LOGGER.info(
+                                "better_thermostat %s: anti-overcool level-2 for TRV %s: "
+                                "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                                "switching to OFF (no FAN_ONLY support)",
+                                self.device_name,
+                                entity_id,
+                                self.cur_temp,
+                                self.bt_target_temp,
+                                _step,
+                            )
+                        # Raise setpoint above AC sensor to prevent cooling
+                        # even if mode change is delayed
+                        _adjusted = _ac_current_temp + _step
+                    elif self.cur_temp <= self.bt_target_temp - _step:
+                        # Level 1: Moderately below target — raise setpoint above
+                        # AC internal sensor so the AC stops cooling
+                        _adjusted = _ac_current_temp + _step
+                        _LOGGER.info(
+                            "better_thermostat %s: anti-overcool level-1 for TRV %s: "
+                            "ext=%.2f <= target=%.2f - step=%.2f, "
+                            "raising setpoint from %.1f to %.1f "
+                            "(ac_current=%.1f + step=%.1f)",
+                            self.device_name,
+                            entity_id,
+                            self.cur_temp,
+                            self.bt_target_temp,
+                            _step,
+                            _new_heating_setpoint,
+                            _adjusted,
+                            _ac_current_temp,
+                            _step,
+                        )
+                    else:
+                        # Original behavior: target just reached, keep inverter AC
+                        # running at minimal cooling power
+                        _adjusted = _ac_current_temp - _step
+                        _LOGGER.debug(
+                            "better_thermostat %s: inverter COOL idle — target %.1f reached (cur=%.1f), "
+                            "setting AC temp from %.1f to %.1f (ac_current=%.1f - step=%.1f)",
+                            self.device_name,
+                            self.bt_target_temp,
+                            self.cur_temp,
+                            _new_heating_setpoint,
+                            _adjusted,
+                            _ac_current_temp,
+                            _step,
+                        )
+                    # Clamp to device temperature range
                     _adjusted = max(
                         _min_t or 5.0, min(_max_t or 30.0, _adjusted)
-                    )
-                    _LOGGER.debug(
-                        "better_thermostat %s: inverter COOL idle — target %.1f reached (cur=%.1f), "
-                        "setting AC temp from %.1f to %.1f (ac_current=%.1f - step=%.1f)",
-                        self.device_name,
-                        self.bt_target_temp,
-                        self.cur_temp,
-                        _new_heating_setpoint,
-                        _adjusted,
-                        _ac_current_temp,
-                        _step,
                     )
                     _new_heating_setpoint = _adjusted
 
@@ -600,6 +675,8 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
             _payload["local_temperature_calibration"] = _new_local_calibration
         if _new_valve_position is not None:
             _payload["valve_position"] = _new_valve_position
+        if _new_fan_mode is not None:
+            _payload["fan_mode"] = _new_fan_mode
         return _payload
     except Exception as e:
         _LOGGER.exception(

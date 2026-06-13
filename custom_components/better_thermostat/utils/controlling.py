@@ -721,6 +721,29 @@ async def control_trv(self, heater_entity_id=None):
                     name=f"bt_check_system_mode_{heater_entity_id}",
                 )
 
+        # Apply fan mode if set by anti-overcooling (FAN_ONLY + lowest speed)
+        _new_fan_mode = _remapped_states.get("fan_mode")
+        if _new_fan_mode is not None:
+            _current_fan_mode = _trv.attributes.get("fan_mode")
+            if _current_fan_mode != _new_fan_mode:
+                _LOGGER.info(
+                    "better_thermostat %s: TO TRV set_fan_mode: %s from: %s to: %s",
+                    self.device_name,
+                    heater_entity_id,
+                    _current_fan_mode,
+                    _new_fan_mode,
+                )
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_fan_mode",
+                    {
+                        "entity_id": heater_entity_id,
+                        "fan_mode": _new_fan_mode,
+                    },
+                    blocking=True,
+                    context=self.context,
+                )
+
         # set new calibration offset
         if (
             _calibration is not None
