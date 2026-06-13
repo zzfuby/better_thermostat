@@ -1,0 +1,44 @@
+# 空调状态同步到 Better Thermostat 温控器
+# 当小米空调 (climate.xiaomi_cn_555278446_mc8) 的状态变化时，
+# 自动同步到 Better Thermostat (climate.ke_ting_wen_kong)
+#
+# 放置方式：复制到 HA 的 automations.yaml 中，或通过「自动化」UI 的 YAML 模式粘贴
+
+alias: "同步空调状态到客厅温控"
+description: "当空调模式/开关变化时，自动同步到 Better Thermostat 温控器"
+trigger:
+  - platform: state
+    entity_id:
+      - climate.xiaomi_cn_555278446_mc8
+
+condition: []
+
+action:
+  - variables:
+      ac_state: "{{ trigger.to_state.state }}"
+      bt_entity: "climate.ke_ting_wen_kong"
+      bt_state: "{{ state(bt_entity) }}"
+
+  # 先检查是否需要执行（避免重复调用）
+  - if:
+      - condition: template
+        value_template: "{{ ac_state != bt_state }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ ac_state in ['heat', 'cool', 'off'] }}"
+        then:
+          - service: climate.set_hvac_mode
+            target:
+              entity_id: "{{ bt_entity }}"
+            data:
+              hvac_mode: "{{ ac_state }}"
+        else:
+          # 如果空调上报了其他状态（如 'dry', 'fan_only', 'auto'），
+          # 这里不做映射，仅记录日志。如需映射，在此处添加规则。
+          - service: system_log.write
+            data:
+              message: >
+                空调 {{ trigger.to_state.entity_id }} 状态变更为 '{{ ac_state }}'，
+                不作为已知 HEAT/COOL/OFF 映射，跳过 BT 同步。
+              level: info

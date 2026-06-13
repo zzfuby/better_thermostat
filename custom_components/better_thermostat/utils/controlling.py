@@ -329,8 +329,11 @@ async def control_cooler(self):
     #   Level 2 (severe):  ext < target - 2*step  →  switch to FAN_ONLY or OFF
     #   Level 1 (moderate): ext <= target - step   →  raise cooler setpoint
     _desired_fan_mode = None
+    # Gate on BT HVAC mode (not desired_mode) because the normal cooling logic
+    # already sets desired_mode=OFF when cur_temp <= bt_target_temp, which
+    # would prevent anti-overcooling from ever firing.
     if (
-        desired_mode == HVACMode.COOL
+        self.bt_hvac_mode == HVACMode.COOL
         and self.cur_temp is not None
         and self.bt_target_temp is not None
     ):
@@ -384,6 +387,11 @@ async def control_cooler(self):
             and self.cur_temp <= self.bt_target_temp - _step
         ):
             _anti_overcool_temp = _cooler_current_temp + _step
+            # Override: the normal logic set desired_mode=OFF because
+            # cur_temp <= bt_target_temp, but we want to keep cooling
+            # with a raised setpoint to prevent the AC from running at
+            # low frequency and causing further temperature drop.
+            desired_mode = HVACMode.COOL
             if desired_temp is None or _anti_overcool_temp > desired_temp:
                 _LOGGER.debug(
                     "better_thermostat %s: anti-overcool level-1 for cooler %s: "
