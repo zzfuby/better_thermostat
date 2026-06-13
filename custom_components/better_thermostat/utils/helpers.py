@@ -91,13 +91,18 @@ def entity_uses_mpc_calibration(bt, entity_id: str) -> bool:
 def get_hvac_bt_mode(self, mode: str) -> str:
     """Return the main HVAC mode mapping for the Better Thermostat.
 
-    The function handles simple mapping from HVACMode.HEAT to configured
-    internal modes used by the integration.
+    Maps public-facing HVAC modes to internal bt_hvac_mode representation.
+    - HEAT → HEAT (pass-through, no mapping needed)
+    - COOL → COOL (pass-through, device directly supports cool mode)
+    - HEAT_COOL → HEAT (legacy: if caller sends HEAT_COOL, default to HEAT internally)
+    - OFF → OFF (pass-through)
     """
-    if mode == HVACMode.HEAT:
-        mode = self.map_on_hvac_mode
-    elif mode == HVACMode.HEAT_COOL:
+    if mode == HVACMode.HEAT_COOL:
+        # Legacy HEAT_COOL mode: default to HEAT internally when no explicit
+        # cool target is available. The temperature-based auto-determination
+        # in async_set_temperature will switch to COOL if needed.
         mode = HVACMode.HEAT
+    # HEAT, COOL, OFF pass through as-is — no more map_on_hvac_mode indirection
     return mode
 
 

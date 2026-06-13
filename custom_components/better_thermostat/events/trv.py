@@ -238,7 +238,7 @@ async def trigger_trv_change(self, event):
     except Exception:
         pass
 
-    if mapped_state in (HVACMode.OFF, HVACMode.HEAT, HVACMode.HEAT_COOL):
+    if mapped_state in (HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.HEAT_COOL):
         if (
             self.real_trvs[entity_id]["hvac_mode"] != _org_trv_state.state
             and not child_lock
@@ -395,7 +395,10 @@ async def trigger_trv_change(self, event):
                         )
                     self.bt_hvac_mode = HVACMode.OFF
             else:
-                self.bt_hvac_mode = HVACMode.HEAT
+                # Preserve current mode (HEAT or COOL) when setpoint is not min_temp.
+                # Only default to HEAT if current mode is not a valid active mode.
+                if self.bt_hvac_mode not in (HVACMode.HEAT, HVACMode.COOL):
+                    self.bt_hvac_mode = HVACMode.HEAT
             _main_change = True
 
     if _main_change is True:
@@ -429,7 +432,7 @@ def convert_inbound_states(self, entity_id, state: State) -> str | None:
 
     remapped_state = mode_remap(self, entity_id, str(state.state), True)
 
-    if remapped_state not in (HVACMode.OFF, HVACMode.HEAT):
+    if remapped_state not in (HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL):
         return None
     return remapped_state
 
@@ -522,6 +525,70 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
             )
             _new_heating_setpoint = _min_temp
             hvac_mode = None
+
+        # Inverter AC behavior: when temperature is within device's valid range
+        # and target has been reached, don't turn off. Instead, set temperature
+        # close to the AC's own reported temperature to keep it running at
+        # minimal power. This prevents cycling and is better for inverter ACs.
+        #
+        # - HEAT mode, cur_temp >= target: set temp = ac_current_temp + step
+        # - COOL mode, cur_temp <= target: set temp = ac_current_temp - step
+        if (
+            hvac_mode in (HVACMode.HEAT, HVACMode.COOL)
+            and _new_heating_setpoint is not None
+            and self.bt_target_temp is not None
+            and self.cur_temp is not None
+        ):
+            _ac_current_temp = self.real_trvs[entity_id].get("current_temperature")
+            if _ac_current_temp is not None and is_reasonable_temperature(
+                _ac_current_temp
+            ):
+                _step = self.bt_target_temp_step or 0.5
+                _min_t = self.real_trvs[entity_id].get("min_temp", self.bt_min_temp)
+                _max_t = self.real_trvs[entity_id].get("max_temp", self.bt_max_temp)
+
+                if hvac_mode == HVACMode.HEAT and self.cur_temp >= self.bt_target_temp:
+                    # Target reached in HEAT mode: set temp slightly above current
+                    # to keep inverter AC running at minimal heating power
+                    _adjusted = _ac_current_temp + _step
+                    _adjusted = max(
+                        _min_t or 5.0, min(_max_t or 30.0, _adjusted)
+                    )
+                    _LOGGER.debug(
+                        "better_thermostat %s: inverter HEAT idle — target %.1f reached (cur=%.1f), "
+                        "setting AC temp from %.1f to %.1f (ac_current=%.1f + step=%.1f)",
+                        self.device_name,
+                        self.bt_target_temp,
+                        self.cur_temp,
+                        _new_heating_setpoint,
+                        _adjusted,
+                        _ac_current_temp,
+                        _step,
+                    )
+                    _new_heating_setpoint = _adjusted
+
+                elif (
+                    hvac_mode == HVACMode.COOL
+                    and self.cur_temp <= self.bt_target_temp
+                ):
+                    # Target reached in COOL mode: set temp slightly below current
+                    # to keep inverter AC running at minimal cooling power
+                    _adjusted = _ac_current_temp - _step
+                    _adjusted = max(
+                        _min_t or 5.0, min(_max_t or 30.0, _adjusted)
+                    )
+                    _LOGGER.debug(
+                        "better_thermostat %s: inverter COOL idle — target %.1f reached (cur=%.1f), "
+                        "setting AC temp from %.1f to %.1f (ac_current=%.1f - step=%.1f)",
+                        self.device_name,
+                        self.bt_target_temp,
+                        self.cur_temp,
+                        _new_heating_setpoint,
+                        _adjusted,
+                        _ac_current_temp,
+                        _step,
+                    )
+                    _new_heating_setpoint = _adjusted
 
         # Build payload; include calibration only if present
         _payload = {

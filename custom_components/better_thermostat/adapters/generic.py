@@ -7,6 +7,7 @@ used by Better Thermostat when a device-specific adapter does not exist.
 import asyncio
 import logging
 
+from homeassistant.components.climate.const import HVACMode
 from homeassistant.components.number.const import SERVICE_SET_VALUE
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfTemperature
 from homeassistant.util.unit_conversion import TemperatureConverter
@@ -153,12 +154,44 @@ async def get_max_offset(self, entity_id):
 
 
 async def set_temperature(self, entity_id, temperature):
-    """Set new target temperature."""
+    """Set new target temperature.
+
+    Before sending the temperature command, check if the physical device is OFF.
+    If it is OFF, turn it ON first (to heat or cool mode based on last_hvac_mode),
+    because most devices ignore set_temperature when in OFF state.
+    """
+    # Convert temperature unit if needed (HA system is °F but device expects it)
     if self.hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT:
         temperature = TemperatureConverter.convert(
             temperature, UnitOfTemperature.CELSIUS, UnitOfTemperature.FAHRENHEIT
         )
         temperature = round(temperature, 1)
+
+    # Check current device state: if OFF, turn ON before setting temperature.
+    # This is critical for devices that have no "auto" mode and must be
+    # explicitly set to HEAT or COOL before accepting a temperature setpoint.
+    device_state = self.hass.states.get(entity_id)
+    _current_hvac_state = device_state.state if device_state else None
+
+    if _current_hvac_state == HVACMode.OFF:
+        # Determine which mode to use: prefer last_hvac_mode, then bt_hvac_mode,
+        # fall back to HEAT as safe default.
+        _trv_info = self.real_trvs.get(entity_id, {})
+        _target_mode = _trv_info.get("last_hvac_mode") or getattr(
+            self, "bt_hvac_mode", None
+        )
+        # Only use valid non-OFF modes (HEAT or COOL)
+        if _target_mode not in (HVACMode.HEAT, HVACMode.COOL):
+            _target_mode = HVACMode.HEAT
+
+        _LOGGER.debug(
+            "better_thermostat %s: device %s is OFF, turning ON to %s before set_temperature",
+            getattr(self, "device_name", "unknown"),
+            entity_id,
+            _target_mode,
+        )
+        await set_hvac_mode(self, entity_id, _target_mode)
+
     await self.hass.services.async_call(
         "climate",
         "set_temperature",

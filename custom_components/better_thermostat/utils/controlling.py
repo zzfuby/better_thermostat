@@ -272,36 +272,52 @@ async def control_cooler(self):
     current_temp = cooler_state.attributes.get("temperature")
 
     # Determine desired state based on current conditions
-    desired_temp = self.bt_target_cooltemp
+    # In COOL mode use bt_target_temp as cooling target (single setpoint).
+    # In legacy HEAT_COOL mode use bt_target_cooltemp (dual setpoint).
+    if self.bt_hvac_mode == HVACMode.COOL:
+        desired_temp = self.bt_target_temp
+    else:
+        desired_temp = self.bt_target_cooltemp
 
     if any(
         v is None
         for v in (
             self.cur_temp,
-            self.bt_target_cooltemp,
             self.tolerance,
             self.bt_target_temp,
         )
     ):
         _LOGGER.debug(
             "better_thermostat %s: cooler %s one or more required values are None "
-            "(cur_temp=%s, bt_target_cooltemp=%s, tolerance=%s, bt_target_temp=%s), "
+            "(cur_temp=%s, tolerance=%s, bt_target_temp=%s), "
             "defaulting to OFF",
             self.device_name,
             self.cooler_entity_id,
             self.cur_temp,
-            self.bt_target_cooltemp,
             self.tolerance,
             self.bt_target_temp,
         )
         desired_mode = HVACMode.OFF
     elif self.bt_hvac_mode == HVACMode.OFF:
         desired_mode = HVACMode.OFF
-    elif (
-        self.cur_temp >= self.bt_target_cooltemp - self.tolerance
-        and self.cur_temp > self.bt_target_temp
-    ):
-        desired_mode = HVACMode.COOL
+    elif self.bt_hvac_mode == HVACMode.COOL:
+        # Explicit COOL mode: activate cooler when above target temp
+        # Use bt_target_temp as cooling target (single setpoint)
+        if self.cur_temp > self.bt_target_temp:
+            desired_mode = HVACMode.COOL
+        else:
+            desired_mode = HVACMode.OFF
+    elif self.bt_hvac_mode == HVACMode.HEAT_COOL:
+        # Legacy HEAT_COOL dual-setpoint mode
+        if self.bt_target_cooltemp is None:
+            desired_mode = HVACMode.OFF
+        elif (
+            self.cur_temp >= self.bt_target_cooltemp - self.tolerance
+            and self.cur_temp > self.bt_target_temp
+        ):
+            desired_mode = HVACMode.COOL
+        else:
+            desired_mode = HVACMode.OFF
     else:
         desired_mode = HVACMode.OFF
 
@@ -489,8 +505,10 @@ async def control_trv(self, heater_entity_id=None):
 
         _new_hvac_mode = handle_window_open(self, _remapped_states)
 
-        # if we don't need to heat, we force HVACMode to be off
-        if self.call_for_heat is False:
+        # If we don't need to heat (outdoor temp already above target), force OFF
+        # for HEAT mode. Skip this check in COOL mode — cooling is needed exactly
+        # when the outdoor temperature is warm.
+        if self.call_for_heat is False and self.bt_hvac_mode != HVACMode.COOL:
             _new_hvac_mode = HVACMode.OFF
 
         # Safety override: if boost mode was active but we forced OFF (window/no-heat),

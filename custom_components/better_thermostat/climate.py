@@ -436,7 +436,7 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         self._unit = unit
         self._device_class = device_class
         self._state_class = state_class
-        self._hvac_list = [HVACMode.HEAT, HVACMode.OFF]
+        self._hvac_list = [HVACMode.HEAT, HVACMode.COOL, HVACMode.OFF]
         self.map_on_hvac_mode = HVACMode.HEAT
         self.next_valve_maintenance = dt_util.now() + timedelta(
             hours=randint(1, 24 * 5)
@@ -583,9 +583,10 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
             )
 
         if self.cooler_entity_id is not None:
-            self._hvac_list.remove(HVACMode.HEAT)
-            self._hvac_list.append(HVACMode.HEAT_COOL)
-            self.map_on_hvac_mode = HVACMode.HEAT_COOL
+            # Cooler entity is configured but HVAC modes remain [HEAT, COOL, OFF].
+            # HEAT controls TRVs, COOL controls the cooler device.
+            # No mode removal needed — the full list is available for manual selection.
+            pass
 
         self.entity_ids = [
             entity for trv in self.all_trvs if (entity := trv["trv"]) is not None
@@ -1501,7 +1502,7 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
             self._current_humidity = 0.0
 
         self.last_window_state = self.window_open
-        if self.bt_hvac_mode not in (HVACMode.OFF, HVACMode.HEAT_COOL, HVACMode.HEAT):
+        if self.bt_hvac_mode not in (HVACMode.OFF, HVACMode.COOL, HVACMode.HEAT):
             self.bt_hvac_mode = HVACMode.HEAT
 
         _LOGGER.debug(
@@ -2347,10 +2348,6 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
 
         # Ensure result is in available modes list
         if result not in self._hvac_list:
-            # HEAT should map to map_on_hvac_mode (HEAT_COOL when cooler exists)
-            if result == HVACMode.HEAT and self.map_on_hvac_mode in self._hvac_list:
-                return self.map_on_hvac_mode
-                # Fallback to OFF if mode still invalid
             return HVACMode.OFF
 
         return result
@@ -2487,14 +2484,23 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
     async def async_set_hvac_mode(self, hvac_mode: HVACMode | str) -> None:
         """Set hvac mode.
 
+        Accepts HEAT, COOL, and OFF modes. HEAT_COOL is accepted for legacy
+        compatibility and is treated as HEAT (temperature-based auto-determination
+        in async_set_temperature will switch to COOL when needed).
+
         Returns
         -------
         None
         """
 
         hvac_mode_norm = normalize_hvac_mode(hvac_mode)
-        if hvac_mode_norm in (HVACMode.HEAT, HVACMode.HEAT_COOL, HVACMode.OFF):
+        if hvac_mode_norm in (HVACMode.HEAT, HVACMode.COOL, HVACMode.OFF):
+            # HEAT→HEAT, COOL→COOL, OFF→OFF (pass-through)
             self.bt_hvac_mode = HVACMode(get_hvac_bt_mode(self, hvac_mode_norm))
+        elif hvac_mode_norm == HVACMode.HEAT_COOL:
+            # Legacy HEAT_COOL: treat as HEAT by default, temperature-based
+            # auto-determination in async_set_temperature will switch to COOL
+            self.bt_hvac_mode = HVACMode.HEAT
         else:
             _LOGGER.error(
                 "better_thermostat %s: Unsupported hvac_mode %s",
@@ -2535,7 +2541,13 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         self.bt_target_cooltemp = adjusted
 
     async def async_set_temperature(self, **kwargs) -> None:
-        """Set new target temperature."""
+        """Set new target temperature.
+
+        Auto-determines HEAT vs COOL mode based on target temperature compared
+        to current room temperature. When the device has no AUTO mode and can
+        only be set to explicit HEAT or COOL, this ensures the correct mode is
+        selected before sending the temperature command.
+        """
         _LOGGER.debug(
             "better_thermostat %s: async_set_temperature kwargs=%s, current preset=%s, hvac_mode=%s",
             self.device_name,
@@ -2555,8 +2567,12 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
                 if hvac_mode_val is not None
                 else None
             )
-            if hvac_mode_norm in (HVACMode.HEAT, HVACMode.HEAT_COOL, HVACMode.OFF):
-                self.bt_hvac_mode = hvac_mode_norm
+            if hvac_mode_norm in (HVACMode.HEAT, HVACMode.COOL, HVACMode.OFF):
+                self.bt_hvac_mode = HVACMode(get_hvac_bt_mode(self, hvac_mode_norm))
+            elif hvac_mode_norm == HVACMode.HEAT_COOL:
+                # Legacy HEAT_COOL: fall back to HEAT, auto-determination below
+                # will switch to COOL if target < current temperature
+                self.bt_hvac_mode = HVACMode.HEAT
             else:
                 _LOGGER.error(
                     "better_thermostat %s: Unsupported hvac_mode %s",
@@ -2615,8 +2631,40 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         if _new_setpointhigh is not None:
             self.bt_target_cooltemp = _new_setpointhigh
 
-        # Enforce ordering: cool target should be above heat target in HEAT_COOL.
-        self._enforce_cool_above_heat()
+        # Auto-determine HEAT vs COOL mode based on target temperature vs current.
+        # This is critical for devices without AUTO mode that require explicit
+        # HEAT or COOL selection before accepting a temperature setpoint.
+        # - If target > current room temp → HEAT (want to warm up)
+        # - If target < current room temp → COOL (want to cool down)
+        # - If target ≈ current temp → keep existing mode (maintain)
+        # Only auto-determine when not explicitly OFF and we have valid readings.
+        if (
+            self.bt_hvac_mode not in (HVACMode.OFF, None)
+            and self.bt_target_temp is not None
+            and self.cur_temp is not None
+            and ATTR_HVAC_MODE not in kwargs
+        ):
+            _step = self.bt_target_temp_step or 0.5
+            if self.bt_target_temp > self.cur_temp + (_step / 2):
+                # Target is above current temp → need heating
+                if self.bt_hvac_mode != HVACMode.HEAT:
+                    _LOGGER.debug(
+                        "better_thermostat %s: auto-switching to HEAT (target %.1f > current %.1f)",
+                        self.device_name,
+                        self.bt_target_temp,
+                        self.cur_temp,
+                    )
+                    self.bt_hvac_mode = HVACMode.HEAT
+            elif self.bt_target_temp < self.cur_temp - (_step / 2):
+                # Target is below current temp → need cooling
+                if self.bt_hvac_mode != HVACMode.COOL:
+                    _LOGGER.debug(
+                        "better_thermostat %s: auto-switching to COOL (target %.1f < current %.1f)",
+                        self.device_name,
+                        self.bt_target_temp,
+                        self.cur_temp,
+                    )
+                    self.bt_hvac_mode = HVACMode.COOL
 
         # If the user manually changes the temperature while in PRESET_NONE (Manual),
         # record it as the stored manual temperature. Specific presets (Comfort, Eco,
@@ -2637,10 +2685,11 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
                 )
 
         _LOGGER.debug(
-            "better_thermostat %s: HA set target temperature to %s & %s",
+            "better_thermostat %s: HA set target temperature to %s & %s, hvac_mode=%s",
             self.device_name,
             self.bt_target_temp,
             self.bt_target_cooltemp,
+            self.bt_hvac_mode,
         )
 
         self.async_write_ha_state()
@@ -2659,7 +2708,19 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         await self.async_set_hvac_mode(HVACMode.OFF)
 
     async def async_turn_on(self) -> None:
-        """Turn the entity on."""
+        """Turn the entity on, auto-selecting HEAT or COOL based on current conditions.
+
+        When a target temperature is already set, compares it with the current
+        room temperature to determine whether to heat or cool. Falls back to
+        HEAT when current temperature is unavailable.
+        """
+        if self.bt_target_temp is not None and self.cur_temp is not None:
+            _step = self.bt_target_temp_step or 0.5
+            if self.bt_target_temp < self.cur_temp - (_step / 2):
+                # Target below current → cool down
+                await self.async_set_hvac_mode(HVACMode.COOL)
+                return
+        # Default: heat mode (target above current, or current unknown)
         await self.async_set_hvac_mode(HVACMode.HEAT)
 
     def _signal_config_change(self) -> None:
@@ -2734,13 +2795,8 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         array
                 Supported features.
         """
-        if self.cooler_entity_id is not None:
-            return (
-                ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
-                | ClimateEntityFeature.PRESET_MODE
-                | ClimateEntityFeature.TURN_OFF
-                | ClimateEntityFeature.TURN_ON
-            )
+        # Always use single target temperature (not range) since we now
+        # support explicit HEAT / COOL modes instead of HEAT_COOL.
         return (
             ClimateEntityFeature.TARGET_TEMPERATURE
             | ClimateEntityFeature.PRESET_MODE

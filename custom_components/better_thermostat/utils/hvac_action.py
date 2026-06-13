@@ -76,6 +76,30 @@ def should_heat_with_tolerance(
     return cur_temp < heat_on_threshold
 
 
+def should_cool_with_tolerance(
+    cur_temp: float,
+    target_temp: float,
+    tolerance: float,
+    previous_action: HVACAction | None,
+) -> bool:
+    """Determine whether cooling should be active based on hysteresis.
+
+    Band: ``[target, target + tolerance]``
+    * Start cooling when ``cur_temp > target + tolerance``.
+    * Continue cooling (if already cooling) until ``cur_temp <= target``.
+    * Stop at ``target`` – never cool *below* target.
+
+    This is the mirror of ``should_heat_with_tolerance`` for cooling mode,
+    needed when the device is in explicit COOL mode (no AUTO/HEAT_COOL).
+    """
+    tolerance = max(0.0, tolerance)
+    cool_off_threshold = target_temp
+    cool_on_threshold = target_temp + tolerance
+    if previous_action == HVACAction.COOLING:
+        return cur_temp > cool_off_threshold
+    return cur_temp > cool_on_threshold
+
+
 _VALVE_THRESH = 0.0
 
 
@@ -128,8 +152,11 @@ def compute_hvac_action(
             new_hold_active=False,
         )
 
-    # Tolerance-based heating decision
+    # Tolerance-based heating decision (HEAT mode and legacy HEAT_COOL)
     heating_allowed = hvac_mode in (HVACMode.HEAT, HVACMode.HEAT_COOL)
+    # Tolerance-based cooling decision (COOL mode and legacy HEAT_COOL)
+    cooling_allowed = hvac_mode in (HVACMode.COOL, HVACMode.HEAT_COOL)
+
     action = HVACAction.IDLE
     tolerance_hold = False
 
@@ -141,14 +168,24 @@ def compute_hvac_action(
 
     tolerance_decision = action
 
-    # Cooling decision
-    if (
-        hvac_mode == HVACMode.HEAT_COOL
-        and cool_target is not None
-        and cur_temp > (cool_target + tolerance)
-    ):
-        action = HVACAction.COOLING
-        tolerance_hold = False
+    # Cooling decision for explicit COOL mode: use target_temp as cooling target
+    # with hysteresis band [target, target + tolerance]
+    if cooling_allowed and action == HVACAction.IDLE:
+        if hvac_mode == HVACMode.COOL:
+            # Explicit COOL mode: use bt_target_temp as cooling target
+            if should_cool_with_tolerance(
+                cur_temp, target_temp, tolerance, prev_action
+            ):
+                action = HVACAction.COOLING
+                tolerance_hold = False
+        elif (
+            hvac_mode == HVACMode.HEAT_COOL
+            and cool_target is not None
+            and cur_temp > (cool_target + tolerance)
+        ):
+            # Legacy HEAT_COOL dual-setpoint cooling (cool_target above heat_target)
+            action = HVACAction.COOLING
+            tolerance_hold = False
 
     # TRV override: if base decision is IDLE but any TRV is active, show HEATING.
     # Suppressed at or above target so a still-closing valve cannot lift the
@@ -203,13 +240,14 @@ def compute_hvac_action(
                 break
 
     # Hysteresis state follows tolerance_decision, not the TRV-overridden action.
-    # A TRV still physically heating must not keep the state machine in the
-    # lenient "was-heating" mode, which would cause heating past target + tolerance.
-    new_last_action = (
-        HVACAction.HEATING
-        if tolerance_decision == HVACAction.HEATING
-        else HVACAction.IDLE
-    )
+    # A TRV still physically heating/cooling must not keep the state machine in the
+    # lenient "was-heating/cooling" mode, which would cause overshooting past target.
+    if tolerance_decision == HVACAction.HEATING:
+        new_last_action = HVACAction.HEATING
+    elif tolerance_decision == HVACAction.COOLING:
+        new_last_action = HVACAction.COOLING
+    else:
+        new_last_action = HVACAction.IDLE
     new_hold_active = bool(tolerance_hold and action != HVACAction.COOLING)
 
     return HvacActionResult(
