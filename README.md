@@ -1,103 +1,103 @@
 # Better Thermostat
 
-[![Active installations](https://badge.t-haber.de/badge/better_thermostat?kill_cache=1)](https://github.com/KartoffelToby/better_thermostat/)
-[![GitHub issues](https://img.shields.io/github/issues/KartoffelToby/better_thermostat?style=for-the-badge)](https://github.com/KartoffelToby/better_thermostat/issues)
-[![Version - 1.8.1](https://img.shields.io/badge/Version-1.8.1-009688?style=for-the-badge)](https://github.com/KartoffelToby/better_thermostat/releases)
+[![活跃安装量](https://badge.t-haber.de/badge/better_thermostat?kill_cache=1)](https://github.com/KartoffelToby/better_thermostat/)
+[![GitHub Issues](https://img.shields.io/github/issues/KartoffelToby/better_thermostat?style=for-the-badge)](https://github.com/KartoffelToby/better_thermostat/issues)
+[![版本 - 1.8.1](https://img.shields.io/badge/Version-1.8.1-009688?style=for-the-badge)](https://github.com/KartoffelToby/better_thermostat/releases)
 [![Discord](https://img.shields.io/discord/925725316540923914.svg?style=for-the-badge)](https://discord.gg/9BUegWTG3K)
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 
-**For more info visit: <https://better-thermostat.org/>**
+**更多信息请访问：<https://better-thermostat.org/>**
 
-## Requirements
+## 系统要求
 
-- Minimum required Home Assistant version: `2024.12`
-  (_Latest tested version: `2026.6.0`_)
+- 最低 Home Assistant 版本：`2024.12`
+  （_最新测试版本：`2026.6.0`_）
 
-### Companion UI
+### 配套 UI
 
-We've created a companion UI element which can display more information than the default thermostat element in Home Assistant. Check it out via HACS: [better-thermostat-ui-card](https://github.com/KartoffelToby/better-thermostat-ui-card)
+我们开发了一个配套的 UI 组件，可以比 Home Assistant 默认温控器卡片显示更多信息。可通过 HACS 安装：[better-thermostat-ui-card](https://github.com/KartoffelToby/better-thermostat-ui-card)
 
-- If you have a question or need help please create a new [discussion](https://github.com/KartoffelToby/better_thermostat/discussions) or check if your question is already answered
-- If you have a suggestion, found a bug, or want to add a new device or function create a new [issue](https://github.com/KartoffelToby/better_thermostat/issues)
-- If you want to contribute to this project create a new [pull request](https://github.com/KartoffelToby/better_thermostat/pulls)
+- 如有疑问或需要帮助，请创建新的 [讨论](https://github.com/KartoffelToby/better_thermostat/discussions)，或检查是否已有相关解答
+- 如有建议、发现 Bug 或想添加新设备/功能，请创建新的 [Issue](https://github.com/KartoffelToby/better_thermostat/issues)
+- 如果想为项目贡献代码，请创建新的 [Pull Request](https://github.com/KartoffelToby/better_thermostat/pulls)
 
-### Features
+### 功能特性
 
-This integration brings some smartness to your connected radiator thermostats setup:
+此集成为你的联网散热器温控阀（TRV）带来智能化能力：
 
-- Uses a temperature sensor far away from the radiators to measure the real room temperature
-- Makes your TRVs fully compatible with Google Home
-- Let your windows disable your heating (avoid programming this via an automation)
-- Your weather forecast provider will turn your heat on/off
-- Or an outside air temperature sensor can do this as well
-- Does some valve maintenance automatically, to avoid them getting stuck closed over the summer
-- Group multiple TRVs to one (e.g. for a room with multiple radiators)
-- Enhance the default TRV Algorithm with some smartness to reduce energy consumption
-- Dynamic preset temperature learning & persistence (baseline/"no preset" remembers the last temperature you set and survives restarts)
-- **Advanced Control Algorithms**: Choose between MPC, PID, TPI, AI Time Based or simple target temperature matching for precise control.
-- **Selectable Presets**: Configure which preset modes are available for your thermostat during setup.
+- 使用远离散热器的温度传感器测量真实的房间温度
+- 让 TRV 完全兼容 Google Home
+- 开窗自动关闭供暖（无需通过自动化编程实现）
+- 根据天气预报自动开关供暖
+- 或通过室外温度传感器实现同样的功能
+- 自动进行阀门维护，防止夏季长期不使用时阀门卡死
+- 将多个 TRV 合并为一个（例如一个房间有多个散热器）
+- 增强默认的 TRV 算法，加入智能化策略以减少能耗
+- 动态预设温度学习与持久化（基准/"无预设"模式记住你上次设置的温度并在重启后恢复）
+- **高级控制算法**：可选 MPC、PID、TPI、AI 时间基准或简单目标温度匹配以实现精确控制
+- **可选预设模式**：在设置过程中可自由选择启用的预设模式
 
-### Advanced Control Algorithms
+### 高级控制算法
 
-Better Thermostat now supports multiple advanced control strategies to optimize your heating:
+Better Thermostat 现在支持多种高级控制策略以优化供暖效果：
 
-- **MPC (Model Predictive Control)**: Uses a physical model of your room and radiator to predict future temperature changes and optimize valve opening.
-- **PID Controller**: A classic Proportional-Integral-Derivative controller that learns your room's characteristics to maintain a stable temperature. It features auto-tuning (currently in beta) to automatically find the best parameters (Kp, Ki, Kd) for your room.
-- **TPI (Time Proportional Integral)**: A control method that cycles the valve on and off (or modulates it) to maintain a stable temperature, reducing overshoot.
-- **AI Time Based**: Uses a custom algorithm based on simple measurements and calculations (not actual AI) to calculate the required heating power and adjusts the TRV calibration to achieve it. This improves upon the standard TRV internal algorithm.
+- **MPC（模型预测控制）**：使用房间和散热器的物理模型来预测未来温度变化，并优化阀门开度。
+- **PID 控制器**：经典的 比例-积分-微分 控制器，通过学习房间特性来维持稳定温度。它具备自动整定功能（目前处于测试阶段），可自动找到适合你房间的最佳参数（Kp、Ki、Kd）。
+- **TPI（时间比例积分）**：一种通过周期性开关（或调节）阀门来控制温度的方法，可减少超调。
+- **AI 时间基准**：使用基于简单测量和计算的自定义算法（并非真正的 AI）来计算所需供暖功率，并通过调整 TRV 校准来实现。这比标准 TRV 内部算法效果更好。
 
-These modes can be selected in the advanced configuration of the device.
+这些模式可以在设备的高级配置中选择。
 
-### Preset Temperature Configuration
+### 预设温度配置
 
-Preset temperatures are now fully configurable via dedicated `number` entities.
+预设温度现在通过专用的 `number` 实体进行完全可配置的管理。
 
-How it works:
+工作方式：
 
-1. During setup or configuration, you can select which **Presets** you want to enable for this thermostat.
-2. For each enabled preset mode (e.g. Eco, Comfort, Sleep), a corresponding `number` entity is created (e.g., `number.better_thermostat_preset_eco`).
-3. These entities are located in the **Configuration** category of the device.
-4. You can adjust the temperature for each preset directly using these number sliders.
-5. The values are automatically persisted across Home Assistant restarts.
-6. Changing a preset temperature via the number entity immediately updates the thermostat if that preset is currently active.
+1. 在设置或配置过程中，你可以选择希望对该温控器启用的 **预设模式（Presets）**。
+2. 对于每个启用的预设模式（如 Eco、Comfort、Sleep），系统会创建对应的 `number` 实体（例如 `number.better_thermostat_preset_eco`）。
+3. 这些实体位于设备的 **Configuration（配置）** 类别中。
+4. 你可以使用这些数字滑块直接调整每个预设的温度。
+5. 数值会在 Home Assistant 重启后自动持久化保留。
+6. 通过 number 实体更改预设温度时，如果该预设当前处于激活状态，温控器会立即更新。
 
-Default starting values:
+默认初始值：
 
 ```text
-Away:            16.0 °C
-Boost:           24.0 °C
-Comfort:         21.0 °C
-Eco:             19.0 °C
-Home:            20.0 °C
-Sleep:           18.0 °C
-Activity:        22.0 °C
+离家（Away）:     16.0 °C
+加速（Boost）:    24.0 °C
+舒适（Comfort）:  21.0 °C
+节能（Eco）:      19.0 °C
+居家（Home）:     20.0 °C
+睡眠（Sleep）:    18.0 °C
+活动（Activity）: 22.0 °C
 ```
 
-### Which hardware do we support?
+### 支持的硬件
 
-We support all thermostats which are compatible with Home Assistant as long as they are shown up as a climate entity.
+我们支持所有兼容 Home Assistant 且显示为 climate 实体的温控器。
 
-**_Integrations that are tested_**
+**_已测试的集成_**
 
 - Zigbee2Mqtt
 - Deconz
 - Tado
 - generic_thermostat
 
-### How to setup
+### 安装配置
 
-Install this integration via HACS or copy the files from the [latest release](https://github.com/KartoffelToby/better_thermostat/releases/latest)
+通过 HACS 安装此集成，或从 [最新发布](https://github.com/KartoffelToby/better_thermostat/releases/latest) 复制文件。
 
-Configuration details can be found in the [documentation](docs/Configuration/configuration.md) or on our website: [better-thermostat.org](https://better-thermostat.org/configuration)
+配置详情请参阅 [文档](docs/Configuration/configuration.md) 或访问我们的网站：[better-thermostat.org](https://better-thermostat.org/configuration)
 
-Some nice-to-know config tips for the configuration.yaml
+以下是一些实用的 `configuration.yaml` 配置技巧。
 
-#### Example Window/Door - Sensor config
+#### 示例：窗/门传感器配置
 
 ```yaml
 group:
   livingroom_windows:
-    name: Livingroom Windows
+    name: 客厅窗户
     icon: mdi:window-open-variant
     all: false
     entities:
@@ -106,18 +106,18 @@ group:
       - binary_sensor.openclose_3
 ```
 
-#### Combine multiple TRV to one (Group)
+#### 将多个 TRV 合并为一个（分组）
 
-No worry, Better Thermostat supports grouping out of the box
+无需担心，Better Thermostat 原生支持分组功能。
 
 ---
 
-## Contributing?
+## 参与贡献？
 
-checkout the [CONTRIBUTING.md](CONTRIBUTING.md) file
+请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 文件。
 
-## ☕ Support
+## ☕ 支持
 
-If you want to support this project, you can ☕ [**buy a coffee here**](https://www.buymeacoffee.com/kartoffeltoby).
+如果你想支持这个项目，可以 ☕ [**在这里请作者喝杯咖啡**](https://www.buymeacoffee.com/kartoffeltoby)。
 
-[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=kartoffeltoby&button_colour=0ac982&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://www.buymeacoffee.com/kartoffeltoby)
+[![请我喝杯咖啡](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=kartoffeltoby&button_colour=0ac982&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://www.buymeacoffee.com/kartoffeltoby)
