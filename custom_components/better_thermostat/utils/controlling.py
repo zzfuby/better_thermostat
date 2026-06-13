@@ -364,7 +364,7 @@ async def control_cooler(self):
                         break
                 if _low_fan is not None:
                     _desired_fan_mode = _low_fan
-                _LOGGER.debug(
+                _LOGGER.info(
                     "better_thermostat %s: anti-overcool level-2 for cooler %s: "
                     "ext=%.2f < target=%.2f - 2*step=%.2f, "
                     "switching to FAN_ONLY (fan_mode=%s, available=%s)",
@@ -378,7 +378,7 @@ async def control_cooler(self):
                 )
             else:
                 desired_mode = HVACMode.OFF
-                _LOGGER.debug(
+                _LOGGER.info(
                     "better_thermostat %s: anti-overcool level-2 for cooler %s: "
                     "ext=%.2f < target=%.2f - 2*step=%.2f, "
                     "switching to OFF (cooler does not support fan mode)",
@@ -403,7 +403,7 @@ async def control_cooler(self):
             # low frequency and causing further temperature drop.
             desired_mode = HVACMode.COOL
             if desired_temp is None or _anti_overcool_temp > desired_temp:
-                _LOGGER.debug(
+                _LOGGER.info(
                     "better_thermostat %s: anti-overcool level-1 for cooler %s: "
                     "ext=%.2f <= target=%.2f - step=%.2f, "
                     "raising setpoint from %.2f to %.2f "
@@ -419,6 +419,36 @@ async def control_cooler(self):
                     _step,
                 )
                 desired_temp = _anti_overcool_temp
+        # Log when gate is open but neither level triggers (helps diagnose)
+        else:
+            _LOGGER.debug(
+                "better_thermostat %s: anti-overcool gate open for cooler %s, "
+                "but no level triggered: "
+                "ext=%.2f target=%.2f step=%.2f cooler_sensor=%s "
+                "(L2 needs ext < %.2f, L1 needs ext <= %.2f and sensor not None)",
+                self.device_name,
+                self.cooler_entity_id,
+                self.cur_temp,
+                self.bt_target_temp,
+                _step,
+                _cooler_current_temp,
+                self.bt_target_temp - 2 * _step,
+                self.bt_target_temp - _step,
+            )
+    else:
+        # Gate not entered: log at info level what prevented the check.
+        # This is expected when BT is OFF or HEAT mode, but if the user
+        # expects anti-overcooling and sees this, the reason pinpoints why.
+        _LOGGER.info(
+            "better_thermostat %s: anti-overcool gate NOT entered for cooler %s: "
+            "bt_hvac_mode=%s cooler_state=%s cur_temp=%s bt_target_temp=%s",
+            self.device_name,
+            self.cooler_entity_id,
+            self.bt_hvac_mode,
+            current_hvac_mode,
+            self.cur_temp,
+            self.bt_target_temp,
+        )
 
     # Only send temperature command if it differs from current
     if desired_temp is None:
