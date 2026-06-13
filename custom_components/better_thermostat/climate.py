@@ -2485,8 +2485,9 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         """Set hvac mode.
 
         Accepts HEAT, COOL, and OFF modes. HEAT_COOL is accepted for legacy
-        compatibility and is treated as HEAT (temperature-based auto-determination
-        in async_set_temperature will switch to COOL when needed).
+        compatibility and is treated as HEAT. The HVAC mode will NOT be
+        automatically changed when the target temperature is adjusted — the user
+        must explicitly switch between HEAT and COOL modes.
 
         Returns
         -------
@@ -2543,10 +2544,9 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
     async def async_set_temperature(self, **kwargs) -> None:
         """Set new target temperature.
 
-        Auto-determines HEAT vs COOL mode based on target temperature compared
-        to current room temperature. When the device has no AUTO mode and can
-        only be set to explicit HEAT or COOL, this ensures the correct mode is
-        selected before sending the temperature command.
+        The HVAC mode (HEAT/COOL) is NOT automatically changed when the
+        target temperature is adjusted — the user must explicitly switch
+        modes via set_hvac_mode.
         """
         _LOGGER.debug(
             "better_thermostat %s: async_set_temperature kwargs=%s, current preset=%s, hvac_mode=%s",
@@ -2630,41 +2630,6 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
 
         if _new_setpointhigh is not None:
             self.bt_target_cooltemp = _new_setpointhigh
-
-        # Auto-determine HEAT vs COOL mode based on target temperature vs current.
-        # This is critical for devices without AUTO mode that require explicit
-        # HEAT or COOL selection before accepting a temperature setpoint.
-        # - If target > current room temp → HEAT (want to warm up)
-        # - If target < current room temp → COOL (want to cool down)
-        # - If target ≈ current temp → keep existing mode (maintain)
-        # Only auto-determine when not explicitly OFF and we have valid readings.
-        if (
-            self.bt_hvac_mode not in (HVACMode.OFF, None)
-            and self.bt_target_temp is not None
-            and self.cur_temp is not None
-            and ATTR_HVAC_MODE not in kwargs
-        ):
-            _step = self.bt_target_temp_step or 0.5
-            if self.bt_target_temp > self.cur_temp + (_step / 2):
-                # Target is above current temp → need heating
-                if self.bt_hvac_mode != HVACMode.HEAT:
-                    _LOGGER.debug(
-                        "better_thermostat %s: auto-switching to HEAT (target %.1f > current %.1f)",
-                        self.device_name,
-                        self.bt_target_temp,
-                        self.cur_temp,
-                    )
-                    self.bt_hvac_mode = HVACMode.HEAT
-            elif self.bt_target_temp < self.cur_temp - (_step / 2):
-                # Target is below current temp → need cooling
-                if self.bt_hvac_mode != HVACMode.COOL:
-                    _LOGGER.debug(
-                        "better_thermostat %s: auto-switching to COOL (target %.1f < current %.1f)",
-                        self.device_name,
-                        self.bt_target_temp,
-                        self.cur_temp,
-                    )
-                    self.bt_hvac_mode = HVACMode.COOL
 
         # If the user manually changes the temperature while in PRESET_NONE (Manual),
         # record it as the stored manual temperature. Specific presets (Comfort, Eco,
