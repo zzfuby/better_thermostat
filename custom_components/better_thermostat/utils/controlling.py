@@ -321,6 +321,87 @@ async def control_cooler(self):
     else:
         desired_mode = HVACMode.OFF
 
+    # Anti-overcooling protection: when the external temperature has already
+    # dropped below the target, the AC in low-frequency mode may still be
+    # cooling and cause further temperature drop.
+    #
+    # Two levels of protection:
+    #   Level 2 (severe):  ext < target - 2*step  →  switch to FAN_ONLY or OFF
+    #   Level 1 (moderate): ext <= target - step   →  raise cooler setpoint
+    _desired_fan_mode = None
+    if (
+        desired_mode == HVACMode.COOL
+        and self.cur_temp is not None
+        and self.bt_target_temp is not None
+    ):
+        _step = self.bt_target_temp_step or 0.5
+        _cooler_current_temp = cooler_state.attributes.get("current_temperature")
+
+        # Level 2: Temperature significantly below target — stop cooling entirely
+        if self.cur_temp < self.bt_target_temp - 2 * _step:
+            _cooler_hvac_modes = cooler_state.attributes.get("hvac_modes") or []
+            if HVACMode.FAN_ONLY in _cooler_hvac_modes:
+                desired_mode = HVACMode.FAN_ONLY
+                # Find the lowest available fan speed
+                _fan_modes = cooler_state.attributes.get("fan_modes") or []
+                _low_fan = None
+                for _candidate in ("low", "lowest", "quiet", "minimum", "speed_1"):
+                    if _candidate in _fan_modes:
+                        _low_fan = _candidate
+                        break
+                if _low_fan is not None:
+                    _desired_fan_mode = _low_fan
+                _LOGGER.debug(
+                    "better_thermostat %s: anti-overcool level-2 for cooler %s: "
+                    "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                    "switching to FAN_ONLY (fan_mode=%s, available=%s)",
+                    self.device_name,
+                    self.cooler_entity_id,
+                    self.cur_temp,
+                    self.bt_target_temp,
+                    _step,
+                    _desired_fan_mode,
+                    _fan_modes,
+                )
+            else:
+                desired_mode = HVACMode.OFF
+                _LOGGER.debug(
+                    "better_thermostat %s: anti-overcool level-2 for cooler %s: "
+                    "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                    "switching to OFF (cooler does not support fan mode)",
+                    self.device_name,
+                    self.cooler_entity_id,
+                    self.cur_temp,
+                    self.bt_target_temp,
+                    _step,
+                )
+            # Suppress temperature command when turning off / switching to fan
+            desired_temp = None
+
+        # Level 1: Temperature moderately below target — raise setpoint
+        elif (
+            _cooler_current_temp is not None
+            and self.cur_temp <= self.bt_target_temp - _step
+        ):
+            _anti_overcool_temp = _cooler_current_temp + _step
+            if desired_temp is None or _anti_overcool_temp > desired_temp:
+                _LOGGER.debug(
+                    "better_thermostat %s: anti-overcool level-1 for cooler %s: "
+                    "ext=%.2f <= target=%.2f - step=%.2f, "
+                    "raising setpoint from %.2f to %.2f "
+                    "(cooler_sensor=%.2f + step=%.2f)",
+                    self.device_name,
+                    self.cooler_entity_id,
+                    self.cur_temp,
+                    self.bt_target_temp,
+                    _step,
+                    desired_temp,
+                    _anti_overcool_temp,
+                    _cooler_current_temp,
+                    _step,
+                )
+                desired_temp = _anti_overcool_temp
+
     # Only send temperature command if it differs from current
     if desired_temp is None:
         _LOGGER.debug(
@@ -375,6 +456,25 @@ async def control_cooler(self):
             blocking=True,
             context=self.context,
         )
+
+    # Set fan mode to lowest speed when switching to FAN_ONLY for anti-overcooling
+    if _desired_fan_mode is not None:
+        _current_fan_mode = cooler_state.attributes.get("fan_mode")
+        if _current_fan_mode != _desired_fan_mode:
+            _LOGGER.debug(
+                "better_thermostat %s: TO COOLER set_fan_mode: %s from: %s to: %s",
+                self.device_name,
+                self.cooler_entity_id,
+                _current_fan_mode,
+                _desired_fan_mode,
+            )
+            await self.hass.services.async_call(
+                "climate",
+                "set_fan_mode",
+                {"entity_id": self.cooler_entity_id, "fan_mode": _desired_fan_mode},
+                blocking=True,
+                context=self.context,
+            )
 
 
 async def control_trv(self, heater_entity_id=None):
