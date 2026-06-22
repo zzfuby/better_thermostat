@@ -18,6 +18,9 @@
           "outdoor_sensor": "Outdoor temperature sensor",
           "weather": "Weather entity to get the outdoor temperature",
           "target_temp_step": "Target temperature step",
+          "anti_overcool_level1": "Anti-overcooling Level 1 threshold (°C) — when external temp is this far below target, raise cooler setpoint",
+          "anti_overcool_level2": "Anti-overcooling Level 2 threshold (°C) — when external temp is this far below target, stop cooling entirely",
+          "anti_overcool_offset": "Anti-overcooling offset multiplier (0-10) — Level 1 setpoint is raised by sensor_temp + N × step",
           "presets": "Enabled Presets"
         },
         "data_description": {
@@ -75,6 +78,9 @@
           "outdoor_sensor": "Outdoor temperature sensor",
           "weather": "Weather entity to get the outdoor temperature",
           "target_temp_step": "Target temperature step",
+          "anti_overcool_level1": "Anti-overcooling Level 1 threshold (°C) — when external temp is this far below target, raise cooler setpoint",
+          "anti_overcool_level2": "Anti-overcooling Level 2 threshold (°C) — when external temp is this far below target, stop cooling entirely",
+          "anti_overcool_offset": "Anti-overcooling offset multiplier (0-10) — Level 1 setpoint is raised by sensor_temp + N × step",
           "presets": "Enabled Presets",
           "valve_maintenance": "If your thermostat has no own maintenance mode, you can use this one",
           "calibration": "The sort of calibration",

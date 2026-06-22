@@ -61,6 +61,9 @@ CONF_INTEGRATION: Final = "integration"
 CONF_NO_SYSTEM_MODE_OFF: Final = "no_off_system_mode"
 CONF_TOLERANCE: Final = "tolerance"
 CONF_TARGET_TEMP_STEP: Final = "target_temp_step"
+CONF_ANTI_OVERCOOL_LEVEL1: Final = "anti_overcool_level1"
+CONF_ANTI_OVERCOOL_LEVEL2: Final = "anti_overcool_level2"
+CONF_ANTI_OVERCOOL_OFFSET: Final = "anti_overcool_offset"
 
 SUPPORT_FLAGS: Final = (
     ClimateEntityFeature.TARGET_TEMPERATURE

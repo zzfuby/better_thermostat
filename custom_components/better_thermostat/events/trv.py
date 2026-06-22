@@ -577,11 +577,14 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
                     # the AC in low-frequency mode may still be cooling and cause
                     # further temperature drop.
                     #
-                    # Two levels:
-                    #   Level 2: ext < target - 2*step  →  switch to FAN_ONLY/OFF
-                    #   Level 1: ext <= target - step   →  raise setpoint above AC sensor
-                    #   Default: target just reached     →  original minimal cooling
-                    if self.cur_temp < self.bt_target_temp - 2 * _step:
+                    # Two levels (thresholds in °C from config):
+                    #   Level 2: ext < target - anti_overcool_level2 → switch to FAN_ONLY/OFF
+                    #   Level 1: ext <= target - anti_overcool_level1 → raise setpoint above AC sensor
+                    #   Default: target just reached → original minimal cooling
+                    _level1_threshold = getattr(self, "bt_anti_overcool_level1", None) or 0.5
+                    _level2_threshold = getattr(self, "bt_anti_overcool_level2", None) or 1.0
+                    _offset_multiplier = getattr(self, "bt_anti_overcool_offset", None) or 1
+                    if self.cur_temp < self.bt_target_temp - _level2_threshold:
                         # Level 2: Severely below target — stop cooling entirely
                         _trv_hvac_modes = self.real_trvs[entity_id].get(
                             "hvac_modes"
@@ -600,13 +603,13 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
                                     break
                             _LOGGER.info(
                                 "better_thermostat %s: anti-overcool level-2 for TRV %s: "
-                                "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                                "ext=%.2f < target=%.2f - threshold=%.2f, "
                                 "switching to FAN_ONLY (fan_mode=%s, available=%s)",
                                 self.device_name,
                                 entity_id,
                                 self.cur_temp,
                                 self.bt_target_temp,
-                                _step,
+                                _level2_threshold,
                                 _new_fan_mode,
                                 _fan_modes,
                             )
@@ -614,34 +617,37 @@ def convert_outbound_states(self, entity_id, hvac_mode) -> dict | None:
                             hvac_mode = HVACMode.OFF
                             _LOGGER.info(
                                 "better_thermostat %s: anti-overcool level-2 for TRV %s: "
-                                "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                                "ext=%.2f < target=%.2f - threshold=%.2f, "
                                 "switching to OFF (no FAN_ONLY support)",
                                 self.device_name,
                                 entity_id,
                                 self.cur_temp,
                                 self.bt_target_temp,
-                                _step,
+                                _level2_threshold,
                             )
                         # Raise setpoint above AC sensor to prevent cooling
                         # even if mode change is delayed
                         _adjusted = _ac_current_temp + _step
-                    elif self.cur_temp <= self.bt_target_temp - _step:
+                    elif self.cur_temp <= self.bt_target_temp - _level1_threshold:
                         # Level 1: Moderately below target — raise setpoint above
                         # AC internal sensor so the AC stops cooling
-                        _adjusted = _ac_current_temp + _step
+                        _anti_overcool_offset = _offset_multiplier * _step
+                        _adjusted = _ac_current_temp + _anti_overcool_offset
                         _LOGGER.info(
                             "better_thermostat %s: anti-overcool level-1 for TRV %s: "
-                            "ext=%.2f <= target=%.2f - step=%.2f, "
+                            "ext=%.2f <= target=%.2f - threshold=%.2f, "
                             "raising setpoint from %.1f to %.1f "
-                            "(ac_current=%.1f + step=%.1f)",
+                            "(ac_current=%.1f + offset=%.2f [multiplier=%d × step=%.2f])",
                             self.device_name,
                             entity_id,
                             self.cur_temp,
                             self.bt_target_temp,
-                            _step,
+                            _level1_threshold,
                             _new_heating_setpoint,
                             _adjusted,
                             _ac_current_temp,
+                            _anti_overcool_offset,
+                            _offset_multiplier,
                             _step,
                         )
                     else:

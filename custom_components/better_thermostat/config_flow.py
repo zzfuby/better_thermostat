@@ -26,6 +26,9 @@ import voluptuous as vol
 from . import DOMAIN  # pylint: disable=unused-import
 from .adapters.delegate import load_adapter
 from .utils.const import (
+    CONF_ANTI_OVERCOOL_LEVEL1,
+    CONF_ANTI_OVERCOOL_LEVEL2,
+    CONF_ANTI_OVERCOOL_OFFSET,
     CONF_CALIBRATION,
     CONF_CALIBRATION_MODE,
     CONF_CHILD_LOCK,
@@ -131,6 +134,9 @@ _USER_FIELD_DEFAULTS: dict[str, Any] = {
     CONF_OFF_TEMPERATURE: 20,
     CONF_TOLERANCE: 0.0,
     CONF_TARGET_TEMP_STEP: "0.0",
+    CONF_ANTI_OVERCOOL_LEVEL1: 0.5,
+    CONF_ANTI_OVERCOOL_LEVEL2: 1.0,
+    CONF_ANTI_OVERCOOL_OFFSET: 1,
 }
 
 
@@ -520,6 +526,48 @@ def _build_user_fields(
         target_step_default = str(target_step_default)
     add_field(CONF_TARGET_TEMP_STEP, TEMP_STEP_SELECTOR, default=target_step_default)
 
+    # Anti-overcooling: Level 1 threshold (°C) — when to start mild anti-overcooling
+    aoc_level1_default = resolve(
+        CONF_ANTI_OVERCOOL_LEVEL1, _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_LEVEL1]
+    )
+    try:
+        aoc_level1_default = float(aoc_level1_default)
+    except (TypeError, ValueError):
+        aoc_level1_default = _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_LEVEL1]
+    add_field(
+        CONF_ANTI_OVERCOOL_LEVEL1,
+        vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+        default=aoc_level1_default,
+    )
+
+    # Anti-overcooling: Level 2 threshold (°C) — when to stop cooling entirely
+    aoc_level2_default = resolve(
+        CONF_ANTI_OVERCOOL_LEVEL2, _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_LEVEL2]
+    )
+    try:
+        aoc_level2_default = float(aoc_level2_default)
+    except (TypeError, ValueError):
+        aoc_level2_default = _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_LEVEL2]
+    add_field(
+        CONF_ANTI_OVERCOOL_LEVEL2,
+        vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+        default=aoc_level2_default,
+    )
+
+    # Anti-overcooling: offset multiplier (uint 0-10) for Level 1 raised setpoint
+    aoc_offset_default = resolve(
+        CONF_ANTI_OVERCOOL_OFFSET, _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_OFFSET]
+    )
+    try:
+        aoc_offset_default = int(aoc_offset_default)
+    except (TypeError, ValueError):
+        aoc_offset_default = _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_OFFSET]
+    add_field(
+        CONF_ANTI_OVERCOOL_OFFSET,
+        vol.All(vol.Coerce(int), vol.Range(min=0, max=10)),
+        default=aoc_offset_default,
+    )
+
     return fields
 
 
@@ -619,6 +667,36 @@ def _normalize_user_submission(
     if target_step in (None, ""):
         target_step = _USER_FIELD_DEFAULTS[CONF_TARGET_TEMP_STEP]
     normalized[CONF_TARGET_TEMP_STEP] = str(target_step)
+
+    for aoc_key in (
+        CONF_ANTI_OVERCOOL_LEVEL1,
+        CONF_ANTI_OVERCOOL_LEVEL2,
+    ):
+        aoc_val = user_input.get(
+            aoc_key,
+            normalized.get(aoc_key, _USER_FIELD_DEFAULTS[aoc_key]),
+        )
+        if aoc_val is None:
+            aoc_val = _USER_FIELD_DEFAULTS[aoc_key]
+        try:
+            normalized[aoc_key] = float(aoc_val)
+        except (TypeError, ValueError):
+            normalized[aoc_key] = _USER_FIELD_DEFAULTS[aoc_key]
+
+    aoc_offset = user_input.get(
+        CONF_ANTI_OVERCOOL_OFFSET,
+        normalized.get(
+            CONF_ANTI_OVERCOOL_OFFSET, _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_OFFSET]
+        ),
+    )
+    if aoc_offset is None:
+        aoc_offset = _USER_FIELD_DEFAULTS[CONF_ANTI_OVERCOOL_OFFSET]
+    try:
+        normalized[CONF_ANTI_OVERCOOL_OFFSET] = int(aoc_offset)
+    except (TypeError, ValueError):
+        normalized[CONF_ANTI_OVERCOOL_OFFSET] = _USER_FIELD_DEFAULTS[
+            CONF_ANTI_OVERCOOL_OFFSET
+        ]
 
     return normalized
 

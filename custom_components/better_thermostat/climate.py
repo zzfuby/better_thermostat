@@ -88,6 +88,9 @@ from .utils.const import (
     ATTR_STATE_SAVED_TEMPERATURE,
     ATTR_STATE_WINDOW_OPEN,
     BETTERTHERMOSTAT_RESET_PID_SCHEMA,
+    CONF_ANTI_OVERCOOL_LEVEL1,
+    CONF_ANTI_OVERCOOL_LEVEL2,
+    CONF_ANTI_OVERCOOL_OFFSET,
     CONF_COOLER,
     CONF_HEATER,
     CONF_HUMIDITY,
@@ -238,6 +241,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entry.data.get(CONF_OFF_TEMPERATURE, None),
         entry.data.get(CONF_TOLERANCE, 0.0),
         entry.data.get(CONF_TARGET_TEMP_STEP, "0.0"),
+        entry.data.get(CONF_ANTI_OVERCOOL_LEVEL1, 0.5),
+        entry.data.get(CONF_ANTI_OVERCOOL_LEVEL2, 1.0),
+        entry.data.get(CONF_ANTI_OVERCOOL_OFFSET, 1),
         entry.data.get(CONF_MODEL, None),
         entry.data.get(CONF_COOLER, None),
         entry.data.get(CONF_PRESETS, None),
@@ -353,6 +359,9 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
         off_temperature,
         tolerance,
         target_temp_step,
+        anti_overcool_level1,
+        anti_overcool_level2,
+        anti_overcool_offset,
         model,
         cooler_entity_id,
         enabled_presets,
@@ -454,6 +463,63 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
             and unit == UnitOfTemperature.FAHRENHEIT
         ):
             self.bt_target_temp_step = round(self.bt_target_temp_step * 5.0 / 9.0, 4)
+
+        # Anti-overcooling: Level 1 threshold (°C) — when cur_temp <= target - this, trigger mild protection
+        try:
+            self.bt_anti_overcool_level1 = float(anti_overcool_level1) if anti_overcool_level1 is not None else 0.5
+            if unit == UnitOfTemperature.FAHRENHEIT:
+                self.bt_anti_overcool_level1 = round(self.bt_anti_overcool_level1 * 5.0 / 9.0, 4)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "better_thermostat %s: invalid anti_overcool_level1 '%s', falling back to 0.5",
+                self.device_name,
+                anti_overcool_level1,
+            )
+            self.bt_anti_overcool_level1 = 0.5
+        if self.bt_anti_overcool_level1 < 0:
+            _LOGGER.warning(
+                "better_thermostat %s: negative anti_overcool_level1 '%s' adjusted to 0.0",
+                self.device_name,
+                self.bt_anti_overcool_level1,
+            )
+            self.bt_anti_overcool_level1 = 0.0
+
+        # Anti-overcooling: Level 2 threshold (°C) — when cur_temp < target - this, stop cooling entirely
+        try:
+            self.bt_anti_overcool_level2 = float(anti_overcool_level2) if anti_overcool_level2 is not None else 1.0
+            if unit == UnitOfTemperature.FAHRENHEIT:
+                self.bt_anti_overcool_level2 = round(self.bt_anti_overcool_level2 * 5.0 / 9.0, 4)
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "better_thermostat %s: invalid anti_overcool_level2 '%s', falling back to 1.0",
+                self.device_name,
+                anti_overcool_level2,
+            )
+            self.bt_anti_overcool_level2 = 1.0
+        if self.bt_anti_overcool_level2 < 0:
+            _LOGGER.warning(
+                "better_thermostat %s: negative anti_overcool_level2 '%s' adjusted to 0.0",
+                self.device_name,
+                self.bt_anti_overcool_level2,
+            )
+            self.bt_anti_overcool_level2 = 0.0
+
+        # Anti-overcooling: offset multiplier (uint 0-10) for Level 1 raised setpoint
+        # The raised setpoint = ac_internal_temp + offset_multiplier * target_temp_step
+        try:
+            self.bt_anti_overcool_offset = int(anti_overcool_offset) if anti_overcool_offset is not None else 1
+        except (TypeError, ValueError):
+            _LOGGER.warning(
+                "better_thermostat %s: invalid anti_overcool_offset '%s', falling back to 1",
+                self.device_name,
+                anti_overcool_offset,
+            )
+            self.bt_anti_overcool_offset = 1
+        if self.bt_anti_overcool_offset < 0:
+            self.bt_anti_overcool_offset = 0
+        if self.bt_anti_overcool_offset > 10:
+            self.bt_anti_overcool_offset = 10
+
         self.bt_min_temp: float | None = 0.0
         self.bt_max_temp: float | None = 30.0
         self.bt_target_temp = 5.0
@@ -2214,6 +2280,9 @@ class BetterThermostat(ClimateEntity, RestoreEntity, ABC):
             ATTR_STATE_OFF_TEMPERATURE: self.off_temperature,
             CONF_TOLERANCE: self.tolerance,
             CONF_TARGET_TEMP_STEP: self.bt_target_temp_step,
+            CONF_ANTI_OVERCOOL_LEVEL1: self.bt_anti_overcool_level1,
+            CONF_ANTI_OVERCOOL_LEVEL2: self.bt_anti_overcool_level2,
+            CONF_ANTI_OVERCOOL_OFFSET: self.bt_anti_overcool_offset,
             ATTR_STATE_HEATING_POWER: self.heating_power,
             ATTR_STATE_HEAT_LOSS: getattr(self, "heat_loss_rate", None),
             ATTR_STATE_ERRORS: json.dumps(self.devices_errors),

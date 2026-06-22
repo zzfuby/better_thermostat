@@ -325,9 +325,9 @@ async def control_cooler(self):
     # dropped below the target, the AC in low-frequency mode may still be
     # cooling and cause further temperature drop.
     #
-    # Two levels of protection:
-    #   Level 2 (severe):  ext < target - 2*step  →  switch to FAN_ONLY or OFF
-    #   Level 1 (moderate): ext <= target - step   →  raise cooler setpoint
+    # Two levels of protection (thresholds in °C from config):
+    #   Level 2 (severe):  ext < target - anti_overcool_level2  →  switch to FAN_ONLY or OFF
+    #   Level 1 (moderate): ext <= target - anti_overcool_level1 →  raise cooler setpoint
     _desired_fan_mode = None
     # Gate on BT HVAC mode (not desired_mode) because the normal cooling logic
     # already sets desired_mode=OFF when cur_temp <= bt_target_temp, which
@@ -348,10 +348,13 @@ async def control_cooler(self):
         and self.bt_target_temp is not None
     ):
         _step = self.bt_target_temp_step or 0.5
+        _level1_threshold = getattr(self, "bt_anti_overcool_level1", None) or 0.5
+        _level2_threshold = getattr(self, "bt_anti_overcool_level2", None) or 1.0
+        _offset_multiplier = getattr(self, "bt_anti_overcool_offset", None) or 1
         _cooler_current_temp = cooler_state.attributes.get("current_temperature")
 
         # Level 2: Temperature significantly below target — stop cooling entirely
-        if self.cur_temp < self.bt_target_temp - 2 * _step:
+        if self.cur_temp < self.bt_target_temp - _level2_threshold:
             _cooler_hvac_modes = cooler_state.attributes.get("hvac_modes") or []
             if HVACMode.FAN_ONLY in _cooler_hvac_modes:
                 desired_mode = HVACMode.FAN_ONLY
@@ -366,13 +369,13 @@ async def control_cooler(self):
                     _desired_fan_mode = _low_fan
                 _LOGGER.info(
                     "better_thermostat %s: anti-overcool level-2 for cooler %s: "
-                    "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                    "ext=%.2f < target=%.2f - threshold=%.2f, "
                     "switching to FAN_ONLY (fan_mode=%s, available=%s)",
                     self.device_name,
                     self.cooler_entity_id,
                     self.cur_temp,
                     self.bt_target_temp,
-                    _step,
+                    _level2_threshold,
                     _desired_fan_mode,
                     _fan_modes,
                 )
@@ -380,13 +383,13 @@ async def control_cooler(self):
                 desired_mode = HVACMode.OFF
                 _LOGGER.info(
                     "better_thermostat %s: anti-overcool level-2 for cooler %s: "
-                    "ext=%.2f < target=%.2f - 2*step=%.2f, "
+                    "ext=%.2f < target=%.2f - threshold=%.2f, "
                     "switching to OFF (cooler does not support fan mode)",
                     self.device_name,
                     self.cooler_entity_id,
                     self.cur_temp,
                     self.bt_target_temp,
-                    _step,
+                    _level2_threshold,
                 )
             # Suppress temperature command when turning off / switching to fan
             desired_temp = None
@@ -394,9 +397,10 @@ async def control_cooler(self):
         # Level 1: Temperature moderately below target — raise setpoint
         elif (
             _cooler_current_temp is not None
-            and self.cur_temp <= self.bt_target_temp - _step
+            and self.cur_temp <= self.bt_target_temp - _level1_threshold
         ):
-            _anti_overcool_temp = _cooler_current_temp + _step
+            _anti_overcool_offset = _offset_multiplier * _step
+            _anti_overcool_temp = _cooler_current_temp + _anti_overcool_offset
             # Override: the normal logic set desired_mode=OFF because
             # cur_temp <= bt_target_temp, but we want to keep cooling
             # with a raised setpoint to prevent the AC from running at
@@ -405,17 +409,19 @@ async def control_cooler(self):
             if desired_temp is None or _anti_overcool_temp > desired_temp:
                 _LOGGER.info(
                     "better_thermostat %s: anti-overcool level-1 for cooler %s: "
-                    "ext=%.2f <= target=%.2f - step=%.2f, "
+                    "ext=%.2f <= target=%.2f - threshold=%.2f, "
                     "raising setpoint from %.2f to %.2f "
-                    "(cooler_sensor=%.2f + step=%.2f)",
+                    "(cooler_sensor=%.2f + offset=%.2f [multiplier=%d × step=%.2f])",
                     self.device_name,
                     self.cooler_entity_id,
                     self.cur_temp,
                     self.bt_target_temp,
-                    _step,
+                    _level1_threshold,
                     desired_temp,
                     _anti_overcool_temp,
                     _cooler_current_temp,
+                    _anti_overcool_offset,
+                    _offset_multiplier,
                     _step,
                 )
                 desired_temp = _anti_overcool_temp
@@ -425,15 +431,18 @@ async def control_cooler(self):
                 "better_thermostat %s: anti-overcool gate open for cooler %s, "
                 "but no level triggered: "
                 "ext=%.2f target=%.2f step=%.2f cooler_sensor=%s "
-                "(L2 needs ext < %.2f, L1 needs ext <= %.2f and sensor not None)",
+                "(L2 needs ext < %.2f [target-%.2f], "
+                "L1 needs ext <= %.2f [target-%.2f] and sensor not None)",
                 self.device_name,
                 self.cooler_entity_id,
                 self.cur_temp,
                 self.bt_target_temp,
                 _step,
                 _cooler_current_temp,
-                self.bt_target_temp - 2 * _step,
-                self.bt_target_temp - _step,
+                self.bt_target_temp - _level2_threshold,
+                _level2_threshold,
+                self.bt_target_temp - _level1_threshold,
+                _level1_threshold,
             )
     else:
         # Gate not entered: log at info level what prevented the check.
